@@ -2,6 +2,11 @@ name: Test smart-git-proxy
 
 on: [push, pull_request, workflow_dispatch]
 
+env:
+  GIT_TRACE: 1
+  GIT_CURL_VERBOSE: 1
+  GIT_TRACE_PACKET: 1
+  GIT_TRACE_PERFORMANCE: 1
 jobs:
   test-proxy:
     runs-on: ubuntu-latest
@@ -12,15 +17,11 @@ jobs:
 
       - run: make build
 
-      - name: Start proxy with GitHub token
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Start proxy
         run: |
           mkdir -p /tmp/git-mirrors
           MIRROR_DIR=/tmp/git-mirrors \
           LISTEN_ADDR=:8080 \
-          AUTH_MODE=static \
-          STATIC_TOKEN="$GITHUB_TOKEN" \
           LOG_LEVEL=debug \
           ./bin/smart-git-proxy &
           sleep 2
