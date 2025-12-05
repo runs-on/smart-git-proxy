@@ -83,11 +83,13 @@ func New(ctx context.Context, serviceID string, logger *slog.Logger) (*Manager, 
 // Start registers the instance with Cloud Map and begins the health heartbeat loop.
 func (m *Manager) Start(ctx context.Context) error {
 	// Register instance
-	_, err := m.client.RegisterInstance(ctx, &servicediscovery.RegisterInstanceInput{
-		ServiceId:  aws.String(m.serviceID),
-		InstanceId: aws.String(m.instanceID),
+	output, err := m.client.RegisterInstance(ctx, &servicediscovery.RegisterInstanceInput{
+		ServiceId:        aws.String(m.serviceID),
+		InstanceId:       aws.String(m.instanceID),
+		CreatorRequestId: aws.String(m.instanceID),
 		Attributes: map[string]string{
-			"AWS_INSTANCE_IPV4": m.privateIP,
+			"AWS_INSTANCE_IPV4":      m.privateIP,
+			"AWS_INIT_HEALTH_STATUS": string(sdtypes.CustomHealthStatusUnhealthy),
 		},
 	})
 	if err != nil {
@@ -95,6 +97,7 @@ func (m *Manager) Start(ctx context.Context) error {
 	}
 
 	m.logger.Info("registered with cloud map",
+		"operation_id", output.OperationId,
 		"service_id", m.serviceID,
 		"instance_id", m.instanceID,
 		"private_ip", m.privateIP,
