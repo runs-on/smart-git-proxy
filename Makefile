@@ -2,7 +2,7 @@ GO ?= mise exec -- go
 BIN := bin/smart-git-proxy
 PKG := ./...
 
-.PHONY: all build lint test fmt tidy upload deploy
+.PHONY: all build lint test fmt tidy upload deploy bump
 
 all: build
 
@@ -46,3 +46,14 @@ endif
 			$(if $(INSTANCE_TYPE),InstanceType=$(INSTANCE_TYPE),) \
 			$(if $(ROOT_VOLUME_SIZE),RootVolumeSize=$(ROOT_VOLUME_SIZE),) \
 		--capabilities CAPABILITY_IAM
+
+bump:
+ifndef TAG
+	$(error TAG is required. Usage: make bump TAG=0.2.0)
+endif
+	@echo "Bumping version to $(TAG)..."
+	sed -i '' 's/Version: "[^"]*"/Version: "$(TAG)"/' cloudformation/smart-git-proxy.yaml
+	git add cloudformation/smart-git-proxy.yaml
+	git commit -m "Bump version to $(TAG)"
+	git tag -a "v$(TAG)" -m "Release $(TAG)"
+	git push origin main --tags

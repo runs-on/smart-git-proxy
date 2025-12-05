@@ -12,8 +12,11 @@ Metadata:
           - ClientSecurityGroupId
           - InstanceType
           - RootVolumeSize
-          - AmiId
-          - ProxyVersion
+
+Mappings:
+  Config:
+    Proxy:
+      Version: "0.1.0"
 
 Parameters:
   VpcId:
@@ -35,18 +38,13 @@ Parameters:
   InstanceType:
     Type: String
     Default: t4g.micro
+    AllowedPattern: ^[a-z][0-9]+g[a-z]*\.[a-z0-9]+$
+    ConstraintDescription: Must be a Graviton instance type (e.g., t4g.micro, c7gd.large, m7g.medium)
     Description: EC2 instance type (use c7gd/m7gd for ARM with NVMe instance store)
   RootVolumeSize:
     Type: Number
     Default: 30
     Description: Root EBS volume size in GB
-  AmiId:
-    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
-    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-arm64
-  ProxyVersion:
-    Type: String
-    Default: latest
-    Description: Version of smart-git-proxy to install (e.g., 0.1.0 or latest)
 
 Conditions:
   UsePublicIp: !Equals [!Ref AssignPublicIp, "true"]
@@ -133,7 +131,7 @@ Resources:
     Type: AWS::EC2::LaunchTemplate
     Properties:
       LaunchTemplateData:
-        ImageId: !Ref AmiId
+        ImageId: '{{resolve:ssm:/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-arm64}}'
         InstanceType: !Ref InstanceType
         IamInstanceProfile:
           Arn: !GetAtt InstanceProfile.Arn
@@ -161,13 +159,8 @@ Resources:
             yum install -y git mdadm xfsprogs nvme-cli
 
             # Install smart-git-proxy RPM
-            VERSION="${ProxyVersion}"
-            if [ "$VERSION" = "latest" ]; then
-              RPM_URL=$(curl -s https://api.github.com/repos/runs-on/smart-git-proxy/releases/latest | grep browser_download_url | grep "linux_arm64.rpm" | cut -d '"' -f 4)
-            else
-              RPM_URL="https://github.com/runs-on/smart-git-proxy/releases/download/v$VERSION/smart-git-proxy_${!VERSION}_linux_arm64.rpm"
-            fi
-            
+            VERSION="${!FindInMap [Config, Proxy, Version]}"
+            RPM_URL="https://github.com/runs-on/smart-git-proxy/releases/download/v$VERSION/smart-git-proxy_${!VERSION}_linux_arm64.rpm"
             yum install -y "$RPM_URL"
 
             # Configure smart-git-proxy with Route53 for DNS registration
