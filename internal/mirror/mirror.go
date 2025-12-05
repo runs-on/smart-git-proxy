@@ -51,8 +51,9 @@ func (m *Mirror) RepoPath(host, owner, repo string) string {
 }
 
 // EnsureRepo ensures the mirror exists and is synced.
+// authHeader is the Authorization header value from the client request (can be empty).
 // Returns the path to the bare repo and the cache status.
-func (m *Mirror) EnsureRepo(ctx context.Context, host, owner, repo, upstreamURL string) (string, Status, error) {
+func (m *Mirror) EnsureRepo(ctx context.Context, host, owner, repo, upstreamURL, authHeader string) (string, Status, error) {
 	repoPath := m.RepoPath(host, owner, repo)
 	key := fmt.Sprintf("%s/%s/%s", host, owner, repo)
 
@@ -60,7 +61,7 @@ func (m *Mirror) EnsureRepo(ctx context.Context, host, owner, repo, upstreamURL 
 	if _, err := os.Stat(repoPath); os.IsNotExist(err) {
 		// Clone new repo (use singleflight to avoid concurrent clones)
 		_, err, _ := m.group.Do("clone:"+key, func() (interface{}, error) {
-			return nil, m.cloneRepo(ctx, repoPath, upstreamURL)
+			return nil, m.cloneRepo(ctx, repoPath, upstreamURL, authHeader)
 		})
 		if err != nil {
 			return "", "", err
@@ -73,7 +74,7 @@ func (m *Mirror) EnsureRepo(ctx context.Context, host, owner, repo, upstreamURL 
 	if m.isStale(key) {
 		// Sync using singleflight (concurrent requests share same fetch)
 		_, err, _ := m.group.Do("sync:"+key, func() (interface{}, error) {
-			return nil, m.syncRepo(ctx, repoPath, upstreamURL)
+			return nil, m.syncRepo(ctx, repoPath, upstreamURL, authHeader)
 		})
 		if err != nil {
 			m.log.Warn("sync failed, serving stale", "repo", key, "err", err)
@@ -97,16 +98,22 @@ func (m *Mirror) isStale(key string) bool {
 }
 
 // cloneRepo creates a new bare mirror.
-func (m *Mirror) cloneRepo(ctx context.Context, repoPath, upstreamURL string) error {
-	m.log.Info("cloning mirror", "path", repoPath, "upstream", upstreamURL)
+func (m *Mirror) cloneRepo(ctx context.Context, repoPath, upstreamURL, authHeader string) error {
+	m.log.Info("cloning mirror", "path", repoPath, "upstream", upstreamURL, "hasAuth", authHeader != "")
 
 	// Create parent directory
 	if err := os.MkdirAll(filepath.Dir(repoPath), 0o755); err != nil {
 		return fmt.Errorf("create parent dir: %w", err)
 	}
 
-	// Clone as bare mirror
-	cmd := exec.CommandContext(ctx, "git", "clone", "--bare", "--mirror", upstreamURL, repoPath)
+	// Build git command with optional auth
+	args := []string{"clone", "--bare", "--mirror"}
+	if authHeader != "" {
+		args = append(args, "-c", fmt.Sprintf("http.extraheader=Authorization: %s", authHeader))
+	}
+	args = append(args, upstreamURL, repoPath)
+
+	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -118,11 +125,17 @@ func (m *Mirror) cloneRepo(ctx context.Context, repoPath, upstreamURL string) er
 }
 
 // syncRepo fetches updates from upstream.
-func (m *Mirror) syncRepo(ctx context.Context, repoPath, upstreamURL string) error {
-	m.log.Debug("syncing mirror", "path", repoPath)
+func (m *Mirror) syncRepo(ctx context.Context, repoPath, upstreamURL, authHeader string) error {
+	m.log.Debug("syncing mirror", "path", repoPath, "hasAuth", authHeader != "")
 
-	// Fetch all refs
-	cmd := exec.CommandContext(ctx, "git", "-C", repoPath, "fetch", "--all", "--prune", "--force")
+	// Build git command with optional auth
+	args := []string{"-C", repoPath}
+	if authHeader != "" {
+		args = append(args, "-c", fmt.Sprintf("http.extraheader=Authorization: %s", authHeader))
+	}
+	args = append(args, "fetch", "--all", "--prune", "--force")
+
+	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
 	output, err := cmd.CombinedOutput()
 	if err != nil {

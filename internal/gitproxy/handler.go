@@ -77,8 +77,12 @@ func (s *Server) handleInfoRefs(w http.ResponseWriter, r *http.Request, host, ow
 	// Build upstream URL for cloning/syncing
 	upstreamURL := fmt.Sprintf("https://%s/%s/%s.git", host, owner, repo)
 
+	// Get auth header from request (pass-through to upstream)
+	authHeader := r.Header.Get("Authorization")
+	s.log.Debug("auth check", "hasAuth", authHeader != "", "repo", repoKey)
+
 	// Ensure mirror is synced
-	repoPath, status, err := s.mirror.EnsureRepo(r.Context(), host, owner, repo, upstreamURL)
+	repoPath, status, err := s.mirror.EnsureRepo(r.Context(), host, owner, repo, upstreamURL, authHeader)
 	if err != nil {
 		s.fail(w, repoKey, KindInfo, err)
 		return
