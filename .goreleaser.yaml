@@ -38,20 +38,12 @@ nfpms:
       - deb
       - rpm
     bindir: /usr/bin
-    deb:
-      depends:
-        - git
-      recommends:
-        - mdadm
-        - xfsprogs
-        - nvme-cli
-    rpm:
-      depends:
-        - git
-      recommends:
-        - mdadm
-        - xfsprogs
-        - nvme-cli
+    dependencies:
+      - git
+    recommends:
+      - mdadm
+      - xfsprogs
+      - nvme-cli
     contents:
       - src: scripts/smart-git-proxy.service
         dst: /lib/systemd/system/smart-git-proxy.service
