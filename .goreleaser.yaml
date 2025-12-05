@@ -36,6 +36,7 @@ nfpms:
     license: MIT
     formats:
       - deb
+      - rpm
     bindir: /usr/bin
     contents:
       - src: scripts/smart-git-proxy.service
