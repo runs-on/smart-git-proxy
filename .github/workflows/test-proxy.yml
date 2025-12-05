@@ -24,12 +24,13 @@ jobs:
           sleep 2
           curl -f http://localhost:8080/healthz
 
+      - name: Configure git to use proxy
+        run: git config --global url."http://localhost:8080/".insteadOf "https://github.com/"
+
       - uses: actions/checkout@v6
         with:
           repository: runs-on/runs-on
           path: checkout1
-        env:
-          GITHUB_SERVER_URL: http://localhost:8080
 
       - run: |
           test -f checkout1/README.md
@@ -41,8 +42,6 @@ jobs:
         with:
           repository: runs-on/runs-on
           path: checkout2
-        env:
-          GITHUB_SERVER_URL: http://localhost:8080
 
       - run: |
           test -f checkout2/README.md
