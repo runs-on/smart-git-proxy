@@ -1,0 +1,63 @@
+name: Test smart-git-proxy
+
+on: [push, pull_request, workflow_dispatch]
+
+jobs:
+  test-proxy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - run: make build
+
+      - name: Start proxy
+        run: |
+          mkdir -p /tmp/git-cache
+          CACHE_DIR=/tmp/git-cache \
+          LISTEN_ADDR=:8080 \
+          UPSTREAM_BASE=https://github.com \
+          AUTH_MODE=none \
+          LOG_LEVEL=debug \
+          ./bin/smart-git-proxy &
+          sleep 2
+          curl -f http://localhost:8080/healthz
+
+      - uses: actions/checkout@v6
+        with:
+          repository: runs-on/runs-on
+          path: checkout1
+        env:
+          GITHUB_SERVER_URL: http://localhost:8080
+
+      - run: |
+          test -f checkout1/README.md
+          echo "First checkout verified"
+
+      - run: curl -s http://localhost:8080/metrics | grep smart_git_proxy
+
+      - uses: actions/checkout@v6
+        with:
+          repository: runs-on/runs-on
+          path: checkout2
+        env:
+          GITHUB_SERVER_URL: http://localhost:8080
+
+      - run: |
+          test -f checkout2/README.md
+          echo "Second checkout verified"
+
+      - name: Verify cache hits
+        run: |
+          curl -s http://localhost:8080/metrics | tee /tmp/metrics.txt
+          echo "--- Cache metrics ---"
+          grep -E "smart_git_proxy_cache_(hits|misses)_total" /tmp/metrics.txt
+          if grep -q 'smart_git_proxy_cache_hits_total.*[1-9]' /tmp/metrics.txt; then
+            echo "SUCCESS: Cache hits detected!"
+          else
+            echo "WARNING: No cache hits found"
+            exit 1
+          fi
