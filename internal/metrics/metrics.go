@@ -12,7 +12,19 @@ type Metrics struct {
 	ErrorsTotal     *prometheus.CounterVec
 }
 
+// New creates metrics registered with the default prometheus registry.
 func New() *Metrics {
+	return NewWithRegistry(prometheus.DefaultRegisterer)
+}
+
+// NewUnregistered creates metrics without registering them (useful for tests).
+func NewUnregistered() *Metrics {
+	return NewWithRegistry(nil)
+}
+
+// NewWithRegistry creates metrics and registers them with the given registerer.
+// Pass nil to skip registration.
+func NewWithRegistry(reg prometheus.Registerer) *Metrics {
 	m := &Metrics{
 		CacheHits: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "smart_git_proxy_cache_hits_total",
@@ -45,14 +57,16 @@ func New() *Metrics {
 		}, []string{"repo", "kind"}),
 	}
 
-	prometheus.MustRegister(
-		m.CacheHits,
-		m.CacheMisses,
-		m.UpstreamBytes,
-		m.UpstreamLatency,
-		m.RequestsTotal,
-		m.ResponsesTotal,
-		m.ErrorsTotal,
-	)
+	if reg != nil {
+		reg.MustRegister(
+			m.CacheHits,
+			m.CacheMisses,
+			m.UpstreamBytes,
+			m.UpstreamLatency,
+			m.RequestsTotal,
+			m.ResponsesTotal,
+			m.ErrorsTotal,
+		)
+	}
 	return m
 }
