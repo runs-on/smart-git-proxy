@@ -6,11 +6,51 @@ HTTP smart Git mirror proxy for `git fetch`/`git clone` over smart HTTP. Maintai
 
 Download pre-built binaries from [Releases](https://github.com/runs-on/smart-git-proxy/releases).
 
+### AWS CloudFormation (recommended for RunsOn)
+
+Deploy the proxy in your RunsOn VPC with auto-healing and DNS-based service discovery:
+
+```
+https://runs-on.s3.eu-west-1.amazonaws.com/cloudformation/smart-git-proxy.yaml
+```
+
+The stack creates:
+- An ASG with a single instance (auto-healing)
+- A Route53 private hosted zone for DNS resolution (`smart-git-proxy.runs-on.internal`)
+- Automatic instance registration/deregistration
+
+Then configure your workflows:
+
+```yaml
+steps:
+  - name: Setup proxy
+    run: |
+      AUTH=$(echo -n "x-access-token:${{ secrets.GITHUB_TOKEN }}" | base64)
+      git config --global url."http://smart-git-proxy.runs-on.internal:8080/github.com/".insteadOf "https://github.com/"
+      git config --global "http.http://smart-git-proxy.runs-on.internal:8080/.extraheader" "AUTHORIZATION: basic $AUTH"
+
+  - name: Clone repo
+    uses: actions/checkout@v4
+```
+
 ### Debian/Ubuntu (.deb)
 ```bash
 # Download and install (auto-creates user, enables systemd service)
 curl -LO https://github.com/runs-on/smart-git-proxy/releases/latest/download/smart-git-proxy_<version>_linux_amd64.deb
 sudo dpkg -i smart-git-proxy_*.deb
+
+# Edit config
+sudo vi /etc/smart-git-proxy/env
+
+# Restart to apply changes
+sudo systemctl restart smart-git-proxy
+```
+
+### RHEL/Amazon Linux (.rpm)
+```bash
+# Download and install (auto-creates user, enables systemd service)
+curl -LO https://github.com/runs-on/smart-git-proxy/releases/latest/download/smart-git-proxy_<version>_linux_arm64.rpm
+sudo yum install -y ./smart-git-proxy_*.rpm
 
 # Edit config
 sudo vi /etc/smart-git-proxy/env
@@ -89,7 +129,7 @@ git -c url."http://localhost:8080/github.com/".insteadOf="https://github.com/" \
 
 ## systemd deployment
 
-The `.deb` package automatically installs and starts the systemd service. For manual setup:
+The `.deb` and `.rpm` packages automatically install and start the systemd service. For manual setup:
 - Unit file: `scripts/smart-git-proxy.service`
 - Example env file: `scripts/env.example`
 - Config location: `/etc/smart-git-proxy/env`
