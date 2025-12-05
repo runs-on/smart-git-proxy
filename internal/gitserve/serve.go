@@ -12,7 +12,7 @@ import (
 
 // ServeInfoRefs handles GET /info/refs?service=git-upload-pack
 // It runs git-upload-pack --stateless-rpc --advertise-refs and adds the pkt-line header.
-func ServeInfoRefs(w http.ResponseWriter, r *http.Request, repoPath string) error {
+func ServeInfoRefs(w http.ResponseWriter, r *http.Request, repoPath string, cacheStatus string) error {
 	service := r.URL.Query().Get("service")
 	if service != "git-upload-pack" {
 		http.Error(w, "unsupported service", http.StatusBadRequest)
@@ -21,6 +21,9 @@ func ServeInfoRefs(w http.ResponseWriter, r *http.Request, repoPath string) erro
 
 	w.Header().Set("Content-Type", "application/x-git-upload-pack-advertisement")
 	w.Header().Set("Cache-Control", "no-cache")
+	if cacheStatus != "" {
+		w.Header().Set("X-Git-Proxy-Status", cacheStatus)
+	}
 	w.WriteHeader(http.StatusOK)
 
 	// Write pkt-line service announcement
@@ -63,9 +66,12 @@ func ServeInfoRefs(w http.ResponseWriter, r *http.Request, repoPath string) erro
 
 // ServeUploadPack handles POST /git-upload-pack
 // It runs git-upload-pack --stateless-rpc with the request body as stdin.
-func ServeUploadPack(w http.ResponseWriter, r *http.Request, repoPath string) error {
+func ServeUploadPack(w http.ResponseWriter, r *http.Request, repoPath string, cacheStatus string) error {
 	w.Header().Set("Content-Type", "application/x-git-upload-pack-result")
 	w.Header().Set("Cache-Control", "no-cache")
+	if cacheStatus != "" {
+		w.Header().Set("X-Git-Proxy-Status", cacheStatus)
+	}
 
 	// Handle gzip-compressed request body
 	var body io.Reader = r.Body

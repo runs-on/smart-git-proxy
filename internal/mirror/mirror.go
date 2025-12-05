@@ -13,6 +13,15 @@ import (
 	"golang.org/x/sync/singleflight"
 )
 
+// Status indicates what happened during EnsureRepo
+type Status string
+
+const (
+	StatusHit   Status = "mirror-hit"   // Served from existing fresh mirror
+	StatusClone Status = "mirror-clone" // Had to clone new mirror
+	StatusSync  Status = "mirror-sync"  // Had to sync stale mirror
+)
+
 // Mirror manages bare git repository mirrors.
 type Mirror struct {
 	root       string
@@ -42,8 +51,8 @@ func (m *Mirror) RepoPath(host, owner, repo string) string {
 }
 
 // EnsureRepo ensures the mirror exists and is synced.
-// Returns the path to the bare repo.
-func (m *Mirror) EnsureRepo(ctx context.Context, host, owner, repo, upstreamURL string) (string, error) {
+// Returns the path to the bare repo and the cache status.
+func (m *Mirror) EnsureRepo(ctx context.Context, host, owner, repo, upstreamURL string) (string, Status, error) {
 	repoPath := m.RepoPath(host, owner, repo)
 	key := fmt.Sprintf("%s/%s/%s", host, owner, repo)
 
@@ -54,10 +63,10 @@ func (m *Mirror) EnsureRepo(ctx context.Context, host, owner, repo, upstreamURL 
 			return nil, m.cloneRepo(ctx, repoPath, upstreamURL)
 		})
 		if err != nil {
-			return "", err
+			return "", "", err
 		}
 		m.lastSync.Store(key, time.Now())
-		return repoPath, nil
+		return repoPath, StatusClone, nil
 	}
 
 	// Check if we need to sync
@@ -68,13 +77,14 @@ func (m *Mirror) EnsureRepo(ctx context.Context, host, owner, repo, upstreamURL 
 		})
 		if err != nil {
 			m.log.Warn("sync failed, serving stale", "repo", key, "err", err)
-			// Continue serving stale data
-		} else {
-			m.lastSync.Store(key, time.Now())
+			// Continue serving stale data, but still report as hit
+			return repoPath, StatusHit, nil
 		}
+		m.lastSync.Store(key, time.Now())
+		return repoPath, StatusSync, nil
 	}
 
-	return repoPath, nil
+	return repoPath, StatusHit, nil
 }
 
 // isStale returns true if the repo needs syncing.
@@ -129,4 +139,3 @@ func (m *Mirror) GetRepoLock(host, owner, repo string) *sync.Mutex {
 	lock, _ := m.repoLocks.LoadOrStore(key, &sync.Mutex{})
 	return lock.(*sync.Mutex)
 }
-

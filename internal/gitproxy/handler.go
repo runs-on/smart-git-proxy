@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"path"
 	"strings"
+	"sync"
 	"time"
 
 	"log/slog"
@@ -30,6 +31,9 @@ type Server struct {
 	mirror  *mirror.Mirror
 	log     *slog.Logger
 	metrics *metrics.Metrics
+
+	// Track last cache status per repo for display in upload-pack
+	statusCache sync.Map // map[repoKey]mirror.Status
 }
 
 func New(cfg *config.Config, m *mirror.Mirror, log *slog.Logger, metrics *metrics.Metrics) *Server {
@@ -74,14 +78,18 @@ func (s *Server) handleInfoRefs(w http.ResponseWriter, r *http.Request, host, ow
 	upstreamURL := fmt.Sprintf("https://%s/%s/%s.git", host, owner, repo)
 
 	// Ensure mirror is synced
-	repoPath, err := s.mirror.EnsureRepo(r.Context(), host, owner, repo, upstreamURL)
+	repoPath, status, err := s.mirror.EnsureRepo(r.Context(), host, owner, repo, upstreamURL)
 	if err != nil {
 		s.fail(w, repoKey, KindInfo, err)
 		return
 	}
 
+	// Store status for the upcoming upload-pack request
+	s.statusCache.Store(repoKey, status)
+	s.log.Info("request", "repo", repoKey, "status", status)
+
 	// Serve refs from local mirror
-	if err := gitserve.ServeInfoRefs(w, r, repoPath); err != nil {
+	if err := gitserve.ServeInfoRefs(w, r, repoPath, string(status)); err != nil {
 		s.log.Error("serve info/refs failed", "err", err, "repo", repoKey)
 		// Response already started, can't change status
 	}
@@ -94,8 +102,14 @@ func (s *Server) handleUploadPack(w http.ResponseWriter, r *http.Request, host, 
 	// Get mirror path (should already exist from info/refs)
 	repoPath := s.mirror.RepoPath(host, owner, repo)
 
+	// Get cached status from info/refs call
+	cacheStatus := ""
+	if v, ok := s.statusCache.Load(repoKey); ok {
+		cacheStatus = string(v.(mirror.Status))
+	}
+
 	// Serve pack from local mirror
-	if err := gitserve.ServeUploadPack(w, r, repoPath); err != nil {
+	if err := gitserve.ServeUploadPack(w, r, repoPath, cacheStatus); err != nil {
 		s.log.Error("serve upload-pack failed", "err", err, "repo", repoKey)
 		// Response already started, can't change status
 	}
