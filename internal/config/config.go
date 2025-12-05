@@ -11,16 +11,17 @@ import (
 )
 
 type Config struct {
-	ListenAddr       string
-	MirrorDir        string
-	MirrorMaxSize    SizeSpec // Max size (absolute or %), zero means default 80%
-	SyncStaleAfter   time.Duration
-	AllowedUpstreams []string
-	LogLevel         string
-	AuthMode         string
-	StaticToken      string
-	MetricsPath      string
-	HealthPath       string
+	ListenAddr           string
+	MirrorDir            string
+	MirrorMaxSize        SizeSpec // Max size (absolute or %), zero means default 80%
+	SyncStaleAfter       time.Duration
+	AllowedUpstreams     []string
+	LogLevel             string
+	AuthMode             string
+	StaticToken          string
+	MetricsPath          string
+	HealthPath           string
+	AWSCloudMapServiceID string // If set, register with AWS Cloud Map and send heartbeats
 }
 
 func Load() (*Config, error) {
@@ -40,6 +41,7 @@ func LoadArgs(args []string) (*Config, error) {
 	fs.StringVar(&cfg.StaticToken, "static-token", envOrDefault("STATIC_TOKEN", ""), "static token used when auth-mode=static")
 	fs.StringVar(&cfg.MetricsPath, "metrics-path", envOrDefault("METRICS_PATH", "/metrics"), "path for Prometheus metrics")
 	fs.StringVar(&cfg.HealthPath, "health-path", envOrDefault("HEALTH_PATH", "/healthz"), "path for health checks")
+	fs.StringVar(&cfg.AWSCloudMapServiceID, "aws-cloud-map-service-id", envOrDefault("AWS_CLOUD_MAP_SERVICE_ID", ""), "AWS Cloud Map service ID for registration and health heartbeat")
 
 	allowedUpstreamsStr := fs.String("allowed-upstreams", envOrDefault("ALLOWED_UPSTREAMS", "github.com"), "comma-separated list of allowed upstream hosts")
 	syncStaleAfterStr := fs.String("sync-stale-after", envOrDefault("SYNC_STALE_AFTER", "2s"), "sync mirror if older than this duration")

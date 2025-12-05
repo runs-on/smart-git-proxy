@@ -1,6 +1,21 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: Smart Git Proxy with auto-discovery via Cloud Map
 
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: "Main configuration [required]"
+        Parameters:
+          - VpcId
+          - SubnetIds
+          - ClientSecurityGroupId
+          - InstanceType
+          - RootVolumeSize
+          - AmiId
+          - ProxyVersion
+
 Parameters:
   VpcId:
     Type: AWS::EC2::VPC::Id
@@ -8,6 +23,16 @@ Parameters:
   SubnetIds:
     Type: List<AWS::EC2::Subnet::Id>
     Description: Subnets for the ASG (private subnets recommended)
+  ClientSecurityGroupId:
+    Type: AWS::EC2::SecurityGroup::Id
+    Description: Security group of clients that will access the proxy
+  AssignPublicIp:
+    Type: String
+    Default: "false"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: Assign public IP (set to true for public subnets)
   InstanceType:
     Type: String
     Default: t3.micro
@@ -23,6 +48,9 @@ Parameters:
     Type: String
     Default: latest
     Description: Version of smart-git-proxy to install (e.g., 0.1.0 or latest)
+
+Conditions:
+  UsePublicIp: !Equals [!Ref AssignPublicIp, "true"]
 
 Resources:
   # Cloud Map namespace creates private hosted zone automatically
@@ -49,6 +77,9 @@ Resources:
         FailureThreshold: 1
 
   # Security group for the proxy
+  # Note: For SSM access in private subnets, ensure VPC has either:
+  # - NAT Gateway, or
+  # - VPC endpoints for: ssm, ssmmessages, ec2messages
   ProxySecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
@@ -58,8 +89,19 @@ Resources:
         - IpProtocol: tcp
           FromPort: 8080
           ToPort: 8080
-          CidrIp: 10.0.0.0/8
-          Description: Git proxy from VPC
+          SourceSecurityGroupId: !Ref ClientSecurityGroupId
+          Description: Git proxy from clients
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+          Description: HTTPS for SSM, GitHub, package downloads
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+          Description: HTTP for package repos
 
   # IAM role for EC2 instances
   InstanceRole:
@@ -105,8 +147,11 @@ Resources:
         InstanceType: !Ref InstanceType
         IamInstanceProfile:
           Arn: !GetAtt InstanceProfile.Arn
-        SecurityGroupIds:
-          - !Ref ProxySecurityGroup
+        NetworkInterfaces:
+          - DeviceIndex: 0
+            AssociatePublicIpAddress: !If [UsePublicIp, true, false]
+            Groups:
+              - !Ref ProxySecurityGroup
         BlockDeviceMappings:
           - DeviceName: /dev/xvda
             Ebs:
@@ -122,12 +167,6 @@ Resources:
             set -ex
             exec > >(tee /var/log/user-data.log) 2>&1
 
-            # Get instance metadata
-            TOKEN=$(curl -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 300")
-            INSTANCE_ID=$(curl -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/instance-id)
-            PRIVATE_IP=$(curl -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/local-ipv4)
-            REGION=$(curl -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/placement/region)
-
             # Install dependencies for ephemeral storage setup (preinstall script needs these)
             yum install -y mdadm xfsprogs nvme-cli
 
@@ -141,68 +180,15 @@ Resources:
             
             yum install -y "$RPM_URL"
 
-            # Setup Cloud Map health check reporter
-            cat > /usr/local/bin/cloudmap-health-check.sh << 'HEALTHSCRIPT'
-            #!/bin/bash
-            TOKEN=$(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 60")
-            INSTANCE_ID=$(curl -s -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/instance-id)
-            REGION=$(curl -s -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/placement/region)
-            SERVICE_ID="${ProxyService}"
+            # Configure smart-git-proxy with Cloud Map service ID for registration and health heartbeat
+            mkdir -p /etc/smart-git-proxy
+            echo "AWS_CLOUD_MAP_SERVICE_ID=${ProxyService}" > /etc/smart-git-proxy/env
 
-            if curl -sf http://localhost:8080/healthz > /dev/null 2>&1; then
-              STATUS="HEALTHY"
-            else
-              STATUS="UNHEALTHY"
-            fi
+            # Restart service to pick up Cloud Map config
+            systemctl restart smart-git-proxy
 
-            aws servicediscovery update-instance-custom-health-status \
-              --service-id "$SERVICE_ID" \
-              --instance-id "$INSTANCE_ID" \
-              --status "$STATUS" \
-              --region "$REGION" 2>/dev/null || true
-            HEALTHSCRIPT
-            chmod +x /usr/local/bin/cloudmap-health-check.sh
-
-            # Systemd timer for health checks (every 10s)
-            cat > /etc/systemd/system/cloudmap-health-check.service << 'EOF'
-            [Unit]
-            Description=Cloud Map Health Check
-
-            [Service]
-            Type=oneshot
-            ExecStart=/usr/local/bin/cloudmap-health-check.sh
-            EOF
-
-            cat > /etc/systemd/system/cloudmap-health-check.timer << 'EOF'
-            [Unit]
-            Description=Run Cloud Map health check every 10 seconds
-
-            [Timer]
-            OnBootSec=30
-            OnUnitActiveSec=10
-
-            [Install]
-            WantedBy=timers.target
-            EOF
-
-            systemctl daemon-reload
-            systemctl enable cloudmap-health-check.timer
-            systemctl start cloudmap-health-check.timer
-
-            # Register with Cloud Map
-            aws servicediscovery register-instance \
-              --service-id ${ProxyService} \
-              --instance-id "$INSTANCE_ID" \
-              --attributes AWS_INSTANCE_IPV4="$PRIVATE_IP" \
-              --region "$REGION"
-
-            # Wait for service to be healthy, then mark as healthy
+            # Wait for service to register and become healthy
             sleep 5
-            aws servicediscovery update-instance-custom-health-status \
-              --service-id ${ProxyService} \
-              --instance-id "$INSTANCE_ID" \
-              --status HEALTHY \
-              --region "$REGION"
 
             # Signal ASG that launch is complete
             /opt/aws/bin/cfn-signal -e $? --stack ${AWS::StackName} --resource AutoScalingGroup --region ${AWS::Region}
@@ -232,12 +218,12 @@ Resources:
     CreationPolicy:
       ResourceSignal:
         Count: 1
-        Timeout: PT10M
+        Timeout: PT5M
     UpdatePolicy:
       AutoScalingRollingUpdate:
         MinInstancesInService: 0
         MaxBatchSize: 1
-        PauseTime: PT10M
+        PauseTime: PT5M
         WaitOnResourceSignals: true
 
   # Lambda to handle deregistration on termination

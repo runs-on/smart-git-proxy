@@ -11,6 +11,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
+	"github.com/crohr/smart-git-proxy/internal/cloudmap"
 	"github.com/crohr/smart-git-proxy/internal/config"
 	"github.com/crohr/smart-git-proxy/internal/gitproxy"
 	"github.com/crohr/smart-git-proxy/internal/logging"
@@ -60,12 +61,33 @@ func main() {
 		}
 	}()
 
+	// AWS Cloud Map registration and heartbeat
+	var cloudMapMgr *cloudmap.Manager
+	if cfg.AWSCloudMapServiceID != "" {
+		var err error
+		cloudMapMgr, err = cloudmap.New(context.Background(), cfg.AWSCloudMapServiceID, logger)
+		if err != nil {
+			logger.Error("cloud map init failed", "err", err)
+			os.Exit(1)
+		}
+		if err := cloudMapMgr.Start(context.Background()); err != nil {
+			logger.Error("cloud map start failed", "err", err)
+			os.Exit(1)
+		}
+	}
+
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	<-sigCh
 
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
+
+	// Deregister from Cloud Map before shutting down HTTP server
+	if cloudMapMgr != nil {
+		cloudMapMgr.Stop(ctx)
+	}
+
 	if err := httpServer.Shutdown(ctx); err != nil {
 		logger.Error("graceful shutdown failed", "err", err)
 	}
