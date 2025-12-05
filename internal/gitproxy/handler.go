@@ -225,16 +225,36 @@ func (s *Server) forwardHeaders(r *http.Request, isInfo bool) http.Header {
 }
 
 func (s *Server) resolveTarget(r *http.Request) (string, string, cache.Kind, error) {
-	targetStr := strings.TrimPrefix(r.URL.Path, "/")
-	if r.URL.RawQuery != "" {
-		targetStr = targetStr + "?" + r.URL.RawQuery
-	}
-	if targetStr == "" {
-		return "", "", "", errors.New("empty target")
+	// Path format: /{host}/{owner}/{repo}/info/refs or /{host}/{owner}/{repo}/git-upload-pack
+	pathStr := strings.TrimPrefix(r.URL.Path, "/")
+	if pathStr == "" {
+		return "", "", "", errors.New("empty path")
 	}
 
-	if !strings.HasPrefix(targetStr, "http://") && !strings.HasPrefix(targetStr, "https://") {
-		targetStr = strings.TrimSuffix(s.cfg.UpstreamBase, "/") + "/" + targetStr
+	// Extract hostname from first path segment
+	parts := strings.SplitN(pathStr, "/", 2)
+	if len(parts) < 2 {
+		return "", "", "", errors.New("invalid path: expected /{host}/{owner}/{repo}/...")
+	}
+	host := parts[0]
+	rest := parts[1]
+
+	// Validate against allowed upstreams
+	allowed := false
+	for _, h := range s.cfg.AllowedUpstreams {
+		if h == host {
+			allowed = true
+			break
+		}
+	}
+	if !allowed {
+		return "", "", "", fmt.Errorf("upstream %q not in allowed list", host)
+	}
+
+	// Build full URL (always https)
+	targetStr := "https://" + host + "/" + rest
+	if r.URL.RawQuery != "" {
+		targetStr = targetStr + "?" + r.URL.RawQuery
 	}
 
 	u, err := url.Parse(targetStr)

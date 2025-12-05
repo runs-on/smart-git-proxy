@@ -34,7 +34,7 @@ func TestE2E_ClonePublicRepo(t *testing.T) {
 	// Create config
 	cfg := &config.Config{
 		ListenAddr:        ":0", // not used directly, we use httptest
-		UpstreamBase:      "https://github.com",
+		AllowedUpstreams:  []string{"github.com"},
 		CacheDir:          cacheDir,
 		CacheSizeBytes:    100 * 1024 * 1024, // 100MB
 		AuthMode:          "none",
@@ -69,7 +69,7 @@ func TestE2E_ClonePublicRepo(t *testing.T) {
 
 	// Clone via proxy using url.insteadOf
 	clonePath := filepath.Join(cloneDir, "hello-world")
-	insteadOf := ts.URL + "/https://github.com/"
+	insteadOf := ts.URL + "/github.com/"
 
 	t.Logf("Proxy URL: %s", ts.URL)
 	t.Logf("Clone target: %s", clonePath)
@@ -145,7 +145,7 @@ func TestE2E_FetchPublicRepo(t *testing.T) {
 
 	cfg := &config.Config{
 		ListenAddr:        ":0",
-		UpstreamBase:      "https://github.com",
+		AllowedUpstreams:  []string{"github.com"},
 		CacheDir:          cacheDir,
 		CacheSizeBytes:    100 * 1024 * 1024,
 		AuthMode:          "none",
@@ -166,7 +166,7 @@ func TestE2E_FetchPublicRepo(t *testing.T) {
 
 	testRepo := "octocat/Hello-World"
 	repoURL := "https://github.com/" + testRepo
-	insteadOf := ts.URL + "/https://github.com/"
+	insteadOf := ts.URL + "/github.com/"
 	clonePath := filepath.Join(cloneDir, "hello-world")
 
 	// Initial clone
@@ -208,7 +208,7 @@ func TestE2E_LsRemote(t *testing.T) {
 
 	cfg := &config.Config{
 		ListenAddr:        ":0",
-		UpstreamBase:      "https://github.com",
+		AllowedUpstreams:  []string{"github.com"},
 		CacheDir:          cacheDir,
 		CacheSizeBytes:    100 * 1024 * 1024,
 		AuthMode:          "none",
@@ -229,7 +229,7 @@ func TestE2E_LsRemote(t *testing.T) {
 
 	testRepo := "octocat/Hello-World"
 	repoURL := "https://github.com/" + testRepo
-	insteadOf := ts.URL + "/https://github.com/"
+	insteadOf := ts.URL + "/github.com/"
 
 	// ls-remote through proxy
 	cmd := exec.Command("git",
@@ -249,6 +249,78 @@ func TestE2E_LsRemote(t *testing.T) {
 
 	t.Logf("ls-remote output: %s", out)
 	t.Log("E2E ls-remote test passed")
+}
+
+func TestE2E_CloneFullDepth(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping e2e test in short mode")
+	}
+
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not found in PATH")
+	}
+
+	cacheDir := t.TempDir()
+	cloneDir := t.TempDir()
+
+	cfg := &config.Config{
+		ListenAddr:        ":0",
+		AllowedUpstreams:  []string{"github.com"},
+		CacheDir:          cacheDir,
+		CacheSizeBytes:    500 * 1024 * 1024, // 500MB for full clone
+		AuthMode:          "none",
+		LogLevel:          "info",
+		UpstreamTimeout:   120 * time.Second, // longer timeout for full clone
+		UserAgent:         "smart-git-proxy-test",
+		AllowInsecureHTTP: false,
+	}
+
+	logger, _ := logging.New(cfg.LogLevel)
+	cacheStore, _ := cache.New(cfg.CacheDir, cfg.CacheSizeBytes, logger)
+	metricsRegistry := metrics.NewUnregistered()
+	upClient := upstream.NewClient(cfg.UpstreamTimeout, cfg.AllowInsecureHTTP, cfg.UserAgent)
+	server := gitproxy.New(cfg, cacheStore, upClient, logger, metricsRegistry)
+
+	ts := httptest.NewServer(server.Handler())
+	defer ts.Close()
+
+	// Clone runs-on/runs-on at full depth
+	testRepo := "runs-on/runs-on"
+	repoURL := "https://github.com/" + testRepo
+	insteadOf := ts.URL + "/github.com/"
+	clonePath := filepath.Join(cloneDir, "runs-on")
+
+	t.Logf("Proxy URL: %s", ts.URL)
+	t.Logf("Clone target: %s", clonePath)
+
+	// Full clone (no --depth)
+	cmd := exec.Command("git",
+		"-c", "url."+insteadOf+".insteadOf=https://github.com/",
+		"clone", repoURL, clonePath,
+	)
+	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("full clone failed: %v\noutput: %s", err, out)
+	}
+	t.Logf("Clone output: %s", out)
+
+	// Verify clone succeeded by checking for README
+	readmePath := filepath.Join(clonePath, "README.md")
+	if _, err := os.Stat(readmePath); os.IsNotExist(err) {
+		t.Fatalf("README.md not found after clone")
+	}
+
+	// Verify we have git history (full depth)
+	logCmd := exec.Command("git", "rev-list", "--count", "HEAD")
+	logCmd.Dir = clonePath
+	countOut, err := logCmd.Output()
+	if err != nil {
+		t.Fatalf("git rev-list failed: %v", err)
+	}
+	t.Logf("Commit count: %s", strings.TrimSpace(string(countOut)))
+
+	t.Log("E2E full depth clone test passed")
 }
 
 func countFiles(dir string) (int, error) {

@@ -55,7 +55,7 @@ func main() {
 	}
 
 	go func() {
-		logger.Info("listening", "addr", cfg.ListenAddr, "cache_dir", cfg.CacheDir, "upstream_base", cfg.UpstreamBase)
+		logger.Info("listening", "addr", cfg.ListenAddr, "cache_dir", cfg.CacheDir, "allowed_upstreams", cfg.AllowedUpstreams)
 		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			logger.Error("http server failed", "err", err)
 			os.Exit(1)

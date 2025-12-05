@@ -49,7 +49,7 @@ func TestEnvOverrides(t *testing.T) {
 func clearEnv(t *testing.T) {
 	t.Helper()
 	for _, k := range []string{
-		"LISTEN_ADDR", "CACHE_DIR", "CACHE_SIZE_BYTES", "UPSTREAM_BASE", "LOG_LEVEL",
+		"LISTEN_ADDR", "CACHE_DIR", "CACHE_SIZE_BYTES", "ALLOWED_UPSTREAMS", "LOG_LEVEL",
 		"AUTH_MODE", "STATIC_TOKEN", "REPACK_INTERVAL", "MAX_PACK_SIZE_BYTES",
 		"UPSTREAM_TIMEOUT",
 	} {

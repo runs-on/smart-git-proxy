@@ -28,7 +28,7 @@ Minimal run with local cache:
 ```bash
 CACHE_DIR=/tmp/git-cache \
 LISTEN_ADDR=:8080 \
-UPSTREAM_BASE=https://github.com \
+ALLOWED_UPSTREAMS=github.com \
 AUTH_MODE=pass-through \
 ./bin/smart-git-proxy
 ```
@@ -36,17 +36,15 @@ AUTH_MODE=pass-through \
 Expose metrics/health via defaults: `/metrics`, `/healthz`.
 
 ## Using the proxy (Git)
-This proxy is not a generic CONNECT proxy; it expects direct smart-HTTP paths so it can cache. Do **not** use `https_proxy` (Git will try CONNECT and you’ll see 301/CONNECT errors). Use URL rewriting instead.
+This proxy is not a generic CONNECT proxy; it expects direct smart-HTTP paths so it can cache. Do **not** use `https_proxy` (Git will try CONNECT and you'll see 301/CONNECT errors). Use URL rewriting instead.
+
+URL format: `http://proxy/{host}/{owner}/{repo}/...` - the hostname (e.g. `github.com`) must be in the path.
 
 ### Quick test (no auth)
 Repository: `https://github.com/runs-on/runs-on`
 ```bash
-# Option 1: Simple rewrite (relies on UPSTREAM_BASE config)
-git -c url."http://localhost:8080/".insteadOf="https://github.com/" \
-    clone https://github.com/runs-on/runs-on /tmp/runs-on
-
-# Option 2: Full URL in path (works with any upstream)
-git -c url."http://localhost:8080/https://github.com/".insteadOf="https://github.com/" \
+# Rewrite GitHub URLs to go through proxy
+git -c url."http://localhost:8080/github.com/".insteadOf="https://github.com/" \
     clone https://github.com/runs-on/runs-on /tmp/runs-on
 ```
 First run populates cache; repeat runs should hit locally.
@@ -55,7 +53,7 @@ First run populates cache; repeat runs should hit locally.
 If the upstream requires a token, either rely on your normal Git creds (pass-through), or run the proxy with a static token:
 ```bash
 AUTH_MODE=static STATIC_TOKEN=ghp_your_token_here ./bin/smart-git-proxy
-git -c url."http://localhost:8080/https://github.com/".insteadOf="https://github.com/" \
+git -c url."http://localhost:8080/github.com/".insteadOf="https://github.com/" \
     ls-remote https://github.com/runs-on/runs-on
 ```
 Static mode injects `Authorization: Bearer $STATIC_TOKEN` upstream.
@@ -65,8 +63,24 @@ Static mode injects `Authorization: Bearer $STATIC_TOKEN` upstream.
 - Example env file: `scripts/env.example` (set `CACHE_DIR` to NVMe mount like `/mnt/git-cache`)
 - Enable: `sudo systemctl enable --now smart-git-proxy`
 
+## Configuration
+
+All config via environment variables (or flags):
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `LISTEN_ADDR` | `:8080` | HTTP listen address |
+| `CACHE_DIR` | `/mnt/git-cache` | Directory for cached packs |
+| `CACHE_SIZE_BYTES` | `200GB` | Max cache size (LRU eviction) |
+| `ALLOWED_UPSTREAMS` | `github.com` | Comma-separated allowed upstream hosts |
+| `UPSTREAM_TIMEOUT` | `60s` | Timeout for upstream requests |
+| `AUTH_MODE` | `pass-through` | `pass-through`, `static`, or `none` |
+| `STATIC_TOKEN` | - | Token for `AUTH_MODE=static` |
+| `MAX_PACK_SIZE_BYTES` | `2GB` | Max allowed pack size from upstream |
+| `LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error` |
+| `ALLOW_INSECURE_HTTP` | `false` | Allow http:// upstreams (not recommended) |
+
 ## Notes / limits
 - Only smart HTTP upload-pack is handled (`info/refs?service=git-upload-pack`, `git-upload-pack` POST).
-- Cache keys are request-based (URL + wants hash); no repo object-graph indexing yet.
-- Max pack size controlled by `MAX_PACK_SIZE_BYTES` (default 2GB). Adjust as needed.***
-
+- Cache keys are request-based (URL + body hash); no repo object-graph indexing yet.
+- Does **not** support `https_proxy` / CONNECT tunneling (use `url.insteadOf` instead).

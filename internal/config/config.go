@@ -18,7 +18,7 @@ type Config struct {
 	CacheSizeBytes    int64
 	RepackInterval    time.Duration
 	UpstreamTimeout   time.Duration
-	UpstreamBase      string
+	AllowedUpstreams  []string
 	LogLevel          string
 	AuthMode          string
 	StaticToken       string
@@ -41,8 +41,9 @@ func LoadArgs(args []string) (*Config, error) {
 
 	fs.StringVar(&cfg.ListenAddr, "listen-addr", envOrDefault("LISTEN_ADDR", ":8080"), "HTTP listen address")
 	fs.StringVar(&cfg.CacheDir, "cache-dir", envOrDefault("CACHE_DIR", "/mnt/git-cache"), "cache directory for packs")
-	fs.StringVar(&cfg.UpstreamBase, "upstream-base", envOrDefault("UPSTREAM_BASE", "https://github.com"), "default upstream base when request path is relative")
 	fs.StringVar(&cfg.LogLevel, "log-level", envOrDefault("LOG_LEVEL", "info"), "log level: debug,info,warn,error")
+
+	allowedUpstreamsStr := fs.String("allowed-upstreams", envOrDefault("ALLOWED_UPSTREAMS", "github.com"), "comma-separated list of allowed upstream hosts")
 	fs.StringVar(&cfg.AuthMode, "auth-mode", envOrDefault("AUTH_MODE", "pass-through"), "auth mode: pass-through|static|none")
 	fs.StringVar(&cfg.StaticToken, "static-token", envOrDefault("STATIC_TOKEN", ""), "static token used when auth-mode=static (sent as Authorization: Bearer)")
 	fs.StringVar(&cfg.MetricsPath, "metrics-path", envOrDefault("METRICS_PATH", "/metrics"), "path for Prometheus metrics")
@@ -71,6 +72,17 @@ func LoadArgs(args []string) (*Config, error) {
 	}
 	if cfg.UpstreamTimeout, err = time.ParseDuration(*upstreamTimeoutStr); err != nil {
 		return nil, fmt.Errorf("invalid upstream-timeout: %w", err)
+	}
+
+	// Parse allowed upstreams
+	for _, h := range strings.Split(*allowedUpstreamsStr, ",") {
+		h = strings.TrimSpace(h)
+		if h != "" {
+			cfg.AllowedUpstreams = append(cfg.AllowedUpstreams, h)
+		}
+	}
+	if len(cfg.AllowedUpstreams) == 0 {
+		return nil, errors.New("at least one allowed upstream is required")
 	}
 
 	if err := validateAuth(cfg); err != nil {
