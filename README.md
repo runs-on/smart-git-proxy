@@ -2,6 +2,14 @@
 
 HTTP smart Git mirror proxy for `git fetch`/`git clone` over smart HTTP. Maintains local bare repo mirrors to serve multiple clients efficiently. Designed to run inside a trusted VPC; plain HTTP listener by default.
 
+## Benefits
+
+- **Faster checkouts** - Clones served from local NVMe storage instead of fetching from GitHub each time
+- **Lower bandwidth costs** - Upstream fetches only happen once per repo; all clients share the same mirror
+- **Reduced GitHub API pressure** - Fewer upstream requests means less rate limiting risk
+- **Resilience to upstream outages** - Cached repos remain available even if GitHub is slow or down
+- **Shared objects across refs** - Unlike HTTP caching, git objects are shared even when clients request different branches/tags
+
 ## Installation
 
 Download pre-built binaries from [Releases](https://github.com/runs-on/smart-git-proxy/releases).
@@ -96,7 +104,6 @@ Minimal run:
 MIRROR_DIR=/tmp/git-mirrors \
 LISTEN_ADDR=:8080 \
 ALLOWED_UPSTREAMS=github.com \
-AUTH_MODE=none \
 ./bin/smart-git-proxy
 ```
 
@@ -146,7 +153,7 @@ All config via environment variables (or flags):
 | `MIRROR_MAX_SIZE` | `80%` | Max cache size: absolute (`200GiB`, `500GB`) or percentage (`80%`). LRU eviction when exceeded |
 | `SYNC_STALE_AFTER` | `2s` | Sync mirror if last sync older than this |
 | `ALLOWED_UPSTREAMS` | `github.com` | Comma-separated allowed upstream hosts |
-| `AUTH_MODE` | `none` | `pass-through`, `static`, or `none` |
+| `AUTH_MODE` | `pass-through` | `pass-through`, `static`, or `none` |
 | `STATIC_TOKEN` | - | Token for `AUTH_MODE=static` |
 | `LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error` |
 

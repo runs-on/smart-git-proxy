@@ -64,9 +64,12 @@ func (m *Mirror) EnsureRepo(ctx context.Context, host, owner, repo, upstreamURL,
 	// Check if repo exists
 	if _, err := os.Stat(repoPath); os.IsNotExist(err) {
 		// Clone new repo (use singleflight to avoid concurrent clones)
-		_, err, _ := m.group.Do("clone:"+key, func() (interface{}, error) {
+		_, err, shared := m.group.Do("clone:"+key, func() (interface{}, error) {
 			return nil, m.cloneRepo(ctx, repoPath, upstreamURL, authHeader)
 		})
+		if shared {
+			m.log.Info("waited for in-flight clone", "repo", key)
+		}
 		if err != nil {
 			return "", "", err
 		}
@@ -91,9 +94,12 @@ func (m *Mirror) EnsureRepo(ctx context.Context, host, owner, repo, upstreamURL,
 	// Check if we need to sync
 	if m.isStale(key) {
 		// Sync using singleflight (concurrent requests share same fetch)
-		_, err, _ := m.group.Do("sync:"+key, func() (interface{}, error) {
+		_, err, shared := m.group.Do("sync:"+key, func() (interface{}, error) {
 			return nil, m.syncRepo(ctx, repoPath, upstreamURL, authHeader)
 		})
+		if shared {
+			m.log.Debug("waited for in-flight sync", "repo", key)
+		}
 		if err != nil {
 			m.log.Warn("sync failed, serving stale", "repo", key, "err", err)
 			// Continue serving stale data, but still report as hit
@@ -149,7 +155,16 @@ func (m *Mirror) cloneRepo(ctx context.Context, repoPath, upstreamURL, authHeade
 		return fmt.Errorf("create parent dir: %w", err)
 	}
 
-	args := []string{"clone", "--bare", "--mirror", upstreamURL, repoPath}
+	// Disable GC and reduce memory pressure for large repos
+	args := []string{
+		"-c", "gc.auto=0",
+		"-c", "core.compression=0",
+		"-c", "pack.window=0",
+		"-c", "pack.depth=0",
+		"-c", "pack.deltaCacheSize=1",
+		"-c", "pack.threads=1",
+		"clone", "--bare", "--mirror", upstreamURL, repoPath,
+	}
 
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Env = gitEnv(authHeader)
@@ -173,7 +188,17 @@ func (m *Mirror) cloneRepo(ctx context.Context, repoPath, upstreamURL, authHeade
 func (m *Mirror) syncRepo(ctx context.Context, repoPath, upstreamURL, authHeader string) error {
 	m.log.Debug("syncing mirror", "path", repoPath, "hasAuth", authHeader != "")
 
-	args := []string{"-C", repoPath, "fetch", "--all", "--prune", "--force"}
+	// Disable GC and reduce memory pressure for large repos
+	args := []string{
+		"-C", repoPath,
+		"-c", "gc.auto=0",
+		"-c", "core.compression=0",
+		"-c", "pack.window=0",
+		"-c", "pack.depth=0",
+		"-c", "pack.deltaCacheSize=1",
+		"-c", "pack.threads=1",
+		"fetch", "--all", "--prune", "--force",
+	}
 
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Env = gitEnv(authHeader)
