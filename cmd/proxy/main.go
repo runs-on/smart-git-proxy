@@ -29,7 +29,7 @@ func main() {
 		log.Fatalf("logger init: %v", err)
 	}
 
-	mirrorStore, err := mirror.New(cfg.MirrorDir, cfg.SyncStaleAfter, logger)
+	mirrorStore, err := mirror.New(cfg.MirrorDir, cfg.SyncStaleAfter, cfg.MirrorMaxSize, logger)
 	if err != nil {
 		logger.Error("mirror init failed", "err", err)
 		os.Exit(1)

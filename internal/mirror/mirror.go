@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/crohr/smart-git-proxy/internal/config"
 	"golang.org/x/sync/singleflight"
 )
 
@@ -27,6 +28,7 @@ type Mirror struct {
 	root       string
 	staleAfter time.Duration
 	log        *slog.Logger
+	cache      *Cache
 
 	group     singleflight.Group
 	lastSync  sync.Map // map[repoKey]time.Time
@@ -34,7 +36,8 @@ type Mirror struct {
 }
 
 // New creates a new Mirror manager.
-func New(root string, staleAfter time.Duration, log *slog.Logger) (*Mirror, error) {
+// maxSize is the maximum cache size (absolute or percentage, zero = 80% of available disk).
+func New(root string, staleAfter time.Duration, maxSize config.SizeSpec, log *slog.Logger) (*Mirror, error) {
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		return nil, fmt.Errorf("create mirror root: %w", err)
 	}
@@ -42,6 +45,7 @@ func New(root string, staleAfter time.Duration, log *slog.Logger) (*Mirror, erro
 		root:       root,
 		staleAfter: staleAfter,
 		log:        log,
+		cache:      NewCache(root, maxSize, log),
 	}, nil
 }
 
@@ -67,8 +71,14 @@ func (m *Mirror) EnsureRepo(ctx context.Context, host, owner, repo, upstreamURL,
 			return "", "", err
 		}
 		m.lastSync.Store(key, time.Now())
+		m.cache.Touch(key)
+		// Trigger LRU eviction check in background after clone
+		go m.cache.MaybeEvict()
 		return repoPath, StatusClone, nil
 	}
+
+	// Touch cache on access (for LRU tracking)
+	m.cache.Touch(key)
 
 	// Repo exists - check if it requires auth
 	if m.requiresAuth(repoPath) {

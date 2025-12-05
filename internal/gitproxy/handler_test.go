@@ -45,7 +45,7 @@ func TestE2E_ClonePublicRepo(t *testing.T) {
 		t.Fatalf("logger init: %v", err)
 	}
 
-	mirrorStore, err := mirror.New(cfg.MirrorDir, cfg.SyncStaleAfter, logger)
+	mirrorStore, err := mirror.New(cfg.MirrorDir, cfg.SyncStaleAfter, config.SizeSpec{}, logger)
 	if err != nil {
 		t.Fatalf("mirror init: %v", err)
 	}
@@ -137,7 +137,7 @@ func TestE2E_FetchPublicRepo(t *testing.T) {
 	}
 
 	logger, _ := logging.New(cfg.LogLevel)
-	mirrorStore, _ := mirror.New(cfg.MirrorDir, cfg.SyncStaleAfter, logger)
+	mirrorStore, _ := mirror.New(cfg.MirrorDir, cfg.SyncStaleAfter, config.SizeSpec{}, logger)
 	metricsRegistry := metrics.NewUnregistered()
 	server := gitproxy.New(cfg, mirrorStore, logger, metricsRegistry)
 
@@ -196,7 +196,7 @@ func TestE2E_LsRemote(t *testing.T) {
 	}
 
 	logger, _ := logging.New(cfg.LogLevel)
-	mirrorStore, _ := mirror.New(cfg.MirrorDir, cfg.SyncStaleAfter, logger)
+	mirrorStore, _ := mirror.New(cfg.MirrorDir, cfg.SyncStaleAfter, config.SizeSpec{}, logger)
 	metricsRegistry := metrics.NewUnregistered()
 	server := gitproxy.New(cfg, mirrorStore, logger, metricsRegistry)
 
@@ -249,7 +249,7 @@ func TestE2E_CloneFullDepth(t *testing.T) {
 	}
 
 	logger, _ := logging.New(cfg.LogLevel)
-	mirrorStore, _ := mirror.New(cfg.MirrorDir, cfg.SyncStaleAfter, logger)
+	mirrorStore, _ := mirror.New(cfg.MirrorDir, cfg.SyncStaleAfter, config.SizeSpec{}, logger)
 	metricsRegistry := metrics.NewUnregistered()
 	server := gitproxy.New(cfg, mirrorStore, logger, metricsRegistry)
 
@@ -319,7 +319,7 @@ func TestE2E_DifferentRefsSameMirror(t *testing.T) {
 	}
 
 	logger, _ := logging.New(cfg.LogLevel)
-	mirrorStore, _ := mirror.New(cfg.MirrorDir, cfg.SyncStaleAfter, logger)
+	mirrorStore, _ := mirror.New(cfg.MirrorDir, cfg.SyncStaleAfter, config.SizeSpec{}, logger)
 	metricsRegistry := metrics.NewUnregistered()
 	server := gitproxy.New(cfg, mirrorStore, logger, metricsRegistry)
 

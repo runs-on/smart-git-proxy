@@ -103,6 +103,7 @@ All config via environment variables (or flags):
 |----------|---------|-------------|
 | `LISTEN_ADDR` | `:8080` | HTTP listen address |
 | `MIRROR_DIR` | `/mnt/git-mirrors` | Directory for bare git mirrors |
+| `MIRROR_MAX_SIZE` | `80%` | Max cache size: absolute (`200GiB`, `500GB`) or percentage (`80%`). LRU eviction when exceeded |
 | `SYNC_STALE_AFTER` | `2s` | Sync mirror if last sync older than this |
 | `ALLOWED_UPSTREAMS` | `github.com` | Comma-separated allowed upstream hosts |
 | `AUTH_MODE` | `none` | `pass-through`, `static`, or `none` |
@@ -136,4 +137,5 @@ All config via environment variables (or flags):
 - Mirrors are synced on `info/refs` requests if stale (configurable via `SYNC_STALE_AFTER`).
 - Concurrent requests for same repo share a single sync operation (singleflight).
 - Does **not** support `https_proxy` / CONNECT tunneling (use `url.insteadOf` instead).
+- LRU cache eviction removes least recently used mirrors when disk usage exceeds `MIRROR_MAX_SIZE`.
 - Mirror cleanup (gc, prune) is handled by git's normal mechanisms.

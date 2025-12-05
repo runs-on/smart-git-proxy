@@ -13,6 +13,7 @@ import (
 type Config struct {
 	ListenAddr       string
 	MirrorDir        string
+	MirrorMaxSize    SizeSpec // Max size (absolute or %), zero means default 80%
 	SyncStaleAfter   time.Duration
 	AllowedUpstreams []string
 	LogLevel         string
@@ -42,6 +43,7 @@ func LoadArgs(args []string) (*Config, error) {
 
 	allowedUpstreamsStr := fs.String("allowed-upstreams", envOrDefault("ALLOWED_UPSTREAMS", "github.com"), "comma-separated list of allowed upstream hosts")
 	syncStaleAfterStr := fs.String("sync-stale-after", envOrDefault("SYNC_STALE_AFTER", "2s"), "sync mirror if older than this duration")
+	mirrorMaxSizeStr := fs.String("mirror-max-size", envOrDefault("MIRROR_MAX_SIZE", ""), "max size for mirrors (e.g. 200GiB, 80%), defaults to 80% of available disk")
 
 	if err := fs.Parse(args); err != nil {
 		return nil, err
@@ -50,6 +52,13 @@ func LoadArgs(args []string) (*Config, error) {
 	var err error
 	if cfg.SyncStaleAfter, err = time.ParseDuration(*syncStaleAfterStr); err != nil {
 		return nil, fmt.Errorf("invalid sync-stale-after: %w", err)
+	}
+
+	// Parse mirror max size (empty string means use default 80% of available)
+	if *mirrorMaxSizeStr != "" {
+		if cfg.MirrorMaxSize, err = ParseSizeSpec(*mirrorMaxSizeStr); err != nil {
+			return nil, fmt.Errorf("invalid mirror-max-size: %w", err)
+		}
 	}
 
 	// Parse allowed upstreams
