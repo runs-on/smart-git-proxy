@@ -70,6 +70,14 @@ func (m *Mirror) EnsureRepo(ctx context.Context, host, owner, repo, upstreamURL,
 		return repoPath, StatusClone, nil
 	}
 
+	// Repo exists - check if it requires auth
+	if m.requiresAuth(repoPath) {
+		if err := m.validateAuth(ctx, upstreamURL, authHeader); err != nil {
+			m.log.Warn("auth validation failed", "repo", key, "err", err)
+			return "", "", fmt.Errorf("authentication required: %w", err)
+		}
+	}
+
 	// Check if we need to sync
 	if m.isStale(key) {
 		// Sync using singleflight (concurrent requests share same fetch)
@@ -95,6 +103,39 @@ func (m *Mirror) isStale(key string) bool {
 		return true
 	}
 	return time.Since(lastSync.(time.Time)) > m.staleAfter
+}
+
+// requiresAuth checks if a repo was cloned with authentication.
+func (m *Mirror) requiresAuth(repoPath string) bool {
+	_, err := os.Stat(filepath.Join(repoPath, ".requires-auth"))
+	return err == nil
+}
+
+// markRequiresAuth marks a repo as requiring authentication.
+func (m *Mirror) markRequiresAuth(repoPath string) error {
+	return os.WriteFile(filepath.Join(repoPath, ".requires-auth"), []byte("1"), 0o644)
+}
+
+// validateAuth validates the auth token can access the upstream repo using git ls-remote.
+func (m *Mirror) validateAuth(ctx context.Context, upstreamURL, authHeader string) error {
+	args := []string{"ls-remote", "--exit-code", "-q"}
+	if authHeader != "" {
+		args = append(args, "-c", fmt.Sprintf("http.extraheader=Authorization: %s", authHeader))
+	}
+	args = append(args, upstreamURL, "HEAD")
+
+	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd.Env = append(os.Environ(),
+		"GIT_TERMINAL_PROMPT=0",
+		"GIT_CONFIG_GLOBAL=/dev/null",
+		"GIT_CONFIG_SYSTEM=/dev/null",
+	)
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("git ls-remote failed: %w\noutput: %s", err, output)
+	}
+	return nil
 }
 
 // cloneRepo creates a new bare mirror.
@@ -124,6 +165,13 @@ func (m *Mirror) cloneRepo(ctx context.Context, repoPath, upstreamURL, authHeade
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("git clone failed: %w\noutput: %s", err, output)
+	}
+
+	// Mark repo as requiring auth if it was cloned with auth
+	if authHeader != "" {
+		if err := m.markRequiresAuth(repoPath); err != nil {
+			m.log.Warn("failed to mark repo as requiring auth", "path", repoPath, "err", err)
+		}
 	}
 
 	m.log.Info("clone complete", "path", repoPath)
