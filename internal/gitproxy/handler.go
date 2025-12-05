@@ -77,9 +77,17 @@ func (s *Server) handleInfoRefs(w http.ResponseWriter, r *http.Request, host, ow
 	// Build upstream URL for cloning/syncing
 	upstreamURL := fmt.Sprintf("https://%s/%s/%s.git", host, owner, repo)
 
-	// Get auth header from request (pass-through to upstream)
-	authHeader := r.Header.Get("Authorization")
-	s.log.Debug("auth check", "hasAuth", authHeader != "", "repo", repoKey)
+	// Determine auth for upstream sync
+	authHeader := ""
+	switch s.cfg.AuthMode {
+	case "static":
+		// Use configured static token
+		authHeader = "Bearer " + s.cfg.StaticToken
+	case "pass-through":
+		// Use auth from client request
+		authHeader = r.Header.Get("Authorization")
+	}
+	s.log.Debug("auth check", "mode", s.cfg.AuthMode, "hasAuth", authHeader != "", "repo", repoKey)
 
 	// Ensure mirror is synced
 	repoPath, status, err := s.mirror.EnsureRepo(r.Context(), host, owner, repo, upstreamURL, authHeader)

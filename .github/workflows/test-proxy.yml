@@ -12,12 +12,15 @@ jobs:
 
       - run: make build
 
-      - name: Start proxy
+      - name: Start proxy with GitHub token
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           mkdir -p /tmp/git-mirrors
           MIRROR_DIR=/tmp/git-mirrors \
           LISTEN_ADDR=:8080 \
-          AUTH_MODE=none \
+          AUTH_MODE=static \
+          STATIC_TOKEN="$GITHUB_TOKEN" \
           LOG_LEVEL=debug \
           ./bin/smart-git-proxy &
           sleep 2
@@ -25,6 +28,13 @@ jobs:
 
       - name: Configure git to use proxy
         run: git config --global url."http://localhost:8080/github.com/".insteadOf "https://github.com/"
+
+      - name: Test clone via proxy (manual)
+        run: |
+          rm -rf /tmp/test-clone
+          git clone https://github.com/runs-on/runs-on /tmp/test-clone
+          test -f /tmp/test-clone/README.md
+          echo "Manual clone verified"
 
       - uses: actions/checkout@v6
         with:
@@ -64,3 +74,12 @@ jobs:
             echo "WARNING: No requests found"
             exit 1
           fi
+
+      - name: Show proxy logs on failure
+        if: failure()
+        run: |
+          echo "=== Proxy process ==="
+          ps aux | grep smart-git-proxy || true
+          echo "=== Mirror directory ==="
+          ls -la /tmp/git-mirrors/ || true
+          find /tmp/git-mirrors -type d || true
