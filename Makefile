@@ -2,12 +2,15 @@ GO ?= mise exec -- go
 BIN := bin/smart-git-proxy
 PKG := ./...
 
-.PHONY: all build lint test fmt tidy upload deploy bump
+.PHONY: all build build-linux-arm64 lint test fmt tidy upload deploy bump remote-debug
 
 all: build
 
 build:
 	$(GO) build -o $(BIN) ./cmd/proxy
+
+build-linux-arm64:
+	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 $(GO) build -o bin/smart-git-proxy-linux-arm64 ./cmd/proxy
 
 lint:
 	golangci-lint run ./...
@@ -58,3 +61,6 @@ endif
 	git commit -m "Bump version to $(TAG)"
 	git tag -a "v$(TAG)" -m "Release $(TAG)"
 	git push origin main --tags
+
+remote-debug: build-linux-arm64
+	./scripts/remote-debug.sh
